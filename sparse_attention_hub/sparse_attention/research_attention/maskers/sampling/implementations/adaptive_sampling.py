@@ -17,6 +17,7 @@ import torch
 from ray import tune
 from scipy.stats import norm
 
+from sparse_attention_hub.metric_logging.stage_timer import stage
 from sparse_attention_hub.sparse_attention.research_attention.maskers.base import (
     MaskerConfig,
     MaskerRegistry,
@@ -364,47 +365,53 @@ class AdaptiveSamplingMasker(SamplingMasker):
             )
 
         # Compute attention scores after removing attention_mask
-        expwts = self._compute_exp_attention_scores(
-            queries, keys, scaling, attention_mask
-        )
-        static_denominator = apply_inv_mask_sum(expwts, previous_mask)
+        with stage("vatt/S1_expwts_fullQK"):
+            expwts = self._compute_exp_attention_scores(
+                queries, keys, scaling, attention_mask
+            )
+        with stage("vatt/S2_static_denominator"):
+            static_denominator = apply_inv_mask_sum(expwts, previous_mask)
 
         # Get sampling parameters
 
         num_base_samples = self._get_base_sample_count(sampling_range)
 
         # Create base sampling mask and estimate std
-        base_sampling_mask, std_estimate = self._get_std_estimate_using_base_sample(
-            expwts,
-            batch_size,
-            num_heads,
-            seq_len_queries,
-            seq_len_keys,
-            start_idx,
-            end_idx,
-            num_base_samples,
-            previous_mask.dtype,
-        )
+        with stage("vatt/S3_base_sample_std"):
+            base_sampling_mask, std_estimate = self._get_std_estimate_using_base_sample(
+                expwts,
+                batch_size,
+                num_heads,
+                seq_len_queries,
+                seq_len_keys,
+                start_idx,
+                end_idx,
+                num_base_samples,
+                previous_mask.dtype,
+            )
         # Compute denominators and budget
-        sampled_denominator = apply_inv_mask_sum(expwts, base_sampling_mask)
-        estimated_denominator = static_denominator + sampled_denominator
-        budget = self._compute_adaptive_budget(
-            std_estimate, estimated_denominator, sampling_range
-        )
-        budget = torch.clamp(budget, min=num_base_samples, max=sampling_range)
+        with stage("vatt/S4_error_eval_and_budget"):
+            sampled_denominator = apply_inv_mask_sum(expwts, base_sampling_mask)
+            estimated_denominator = static_denominator + sampled_denominator
+            budget = self._compute_adaptive_budget(
+                std_estimate, estimated_denominator, sampling_range
+            )
+            budget = torch.clamp(budget, min=num_base_samples, max=sampling_range)
 
         # Create adaptive sampling mask
-        sampling_probabilities = (budget / sampling_range).to(previous_mask.dtype)
-        adaptive_mask = create_sampling_mask_with_per_head_budget(
-            budgets=budget,
-            sampling_probability=sampling_probabilities,
-            seq_len_keys=seq_len_keys,
-            start_idx=start_idx,
-            end_idx=end_idx,
-            dtype=previous_mask.dtype,
-        )
+        with stage("vatt/S5_resample_extra_budget"):
+            sampling_probabilities = (budget / sampling_range).to(previous_mask.dtype)
+            adaptive_mask = create_sampling_mask_with_per_head_budget(
+                budgets=budget,
+                sampling_probability=sampling_probabilities,
+                seq_len_keys=seq_len_keys,
+                start_idx=start_idx,
+                end_idx=end_idx,
+                dtype=previous_mask.dtype,
+            )
         # Merge masks
-        return previous_mask.merge_mask(adaptive_mask, inplace=False)
+        with stage("vatt/S6_merge_mask"):
+            return previous_mask.merge_mask(adaptive_mask, inplace=False)
 
     @classmethod
     def create_from_config(cls, config: MaskerConfig) -> "AdaptiveSamplingMasker":

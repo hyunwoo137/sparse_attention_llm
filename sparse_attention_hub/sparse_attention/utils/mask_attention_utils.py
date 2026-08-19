@@ -5,6 +5,8 @@ from typing import Any, Dict, Optional, Tuple, Union
 import torch
 from torch import nn
 
+from sparse_attention_hub.metric_logging.stage_timer import stage
+
 from .kv_utils import _get_num_key_value_groups, repeat_kv
 from .mask import Mask
 
@@ -141,8 +143,13 @@ def create_sampling_mask_with_per_head_budget(
     num_rows = batch_size * num_heads * seq_len_queries
     budgets_flat = budgets.view(num_rows)  # (num_rows,)
 
-    # Calculate total number of elements to sample
-    total_elements = int(budgets_flat.sum().item())
+    # Calculate total number of elements to sample.
+    # NOTE: the adaptive budget is data-dependent, so the size of the sparse mask is
+    # not known until the device reports it -- this .item() is a hard device->host
+    # sync on every layer of every decode step.  Timed separately because it is a
+    # pipeline stall rather than arithmetic.
+    with stage("vatt/S5a_D2H_sync_budget_sum"):
+        total_elements = int(budgets_flat.sum().item())
 
     # Create ptr array using cumulative sum of budgets
     ptr = torch.cat(

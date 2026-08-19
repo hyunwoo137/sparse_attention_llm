@@ -64,12 +64,27 @@ class SparseAttention(ABC):
         # Import here to avoid circular imports
         from .efficient_attention import EfficientAttention, EfficientAttentionConfig
         from .research_attention import ResearchAttention, ResearchAttentionConfig
+        from .uta_attention import (
+            UTAAttention, UTAAttentionConfig,
+            UTAJensenAttention, UTAJensenConfig,
+            UTAMultiBinAttention, UTAMultiBinConfig,
+        )
 
         # Check config type and route to appropriate create_from_config method
-        if isinstance(config, ResearchAttentionConfig):
+        # Most-specific subclasses must be checked first
+        if isinstance(config, UTAMultiBinConfig):
+            return UTAMultiBinAttention.create_from_config(config)
+        elif isinstance(config, UTAJensenConfig):
+            return UTAJensenAttention.create_from_config(config)
+        elif isinstance(config, UTAAttentionConfig):
+            return UTAAttention.create_from_config(config)
+        elif isinstance(config, ResearchAttentionConfig):
             return ResearchAttention.create_from_config(config)
         elif isinstance(config, EfficientAttentionConfig):
             return EfficientAttention.create_from_config(config)
         else:
             # Fallback to default behavior for base config
             return cls(config)
+
+
+

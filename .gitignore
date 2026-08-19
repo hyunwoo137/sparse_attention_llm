@@ -152,3 +152,8 @@ test_chunked_prefill.py
 .DS_Store
 Thumbs.db
 bandit-report.json
+
+# Benchmark result data (large binary/CSV/JSON dumps, ~12GB) - excluded from git
+/results_*/
+/results/*
+!/results/*.md

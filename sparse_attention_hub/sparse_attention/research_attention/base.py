@@ -7,6 +7,7 @@ import torch
 from torch import nn
 
 from sparse_attention_hub.metric_logging.logger import MicroMetricLogger
+from sparse_attention_hub.metric_logging.stage_timer import stage
 
 from ..base import SparseAttention, SparseAttentionConfig
 from ..utils.mask import Mask
@@ -106,17 +107,18 @@ class ResearchAttention(SparseAttention):
 
         # Apply all maskers sequentially, each one on the output of the previous one
         for masker in self.maskers:
-            sparse_attention_mask = masker.add_mask(
-                keys=keys,
-                queries=queries,
-                values=values,
-                attention_mask=attention_mask,
-                scaling=scaling,
-                dropout=dropout,
-                sparse_meta_data=sparse_meta_data,
-                previous_mask=sparse_attention_mask,
-                **kwargs,
-            )
+            with stage(f"sel/{type(masker).__name__}"):
+                sparse_attention_mask = masker.add_mask(
+                    keys=keys,
+                    queries=queries,
+                    values=values,
+                    attention_mask=attention_mask,
+                    scaling=scaling,
+                    dropout=dropout,
+                    sparse_meta_data=sparse_meta_data,
+                    previous_mask=sparse_attention_mask,
+                    **kwargs,
+                )
 
         if MicroMetricLogger().is_metric_enabled("research_attention_density"):
             MicroMetricLogger().log(
@@ -133,19 +135,20 @@ class ResearchAttention(SparseAttention):
         # Always request attention weights to match the expected return signature
         attention_output: torch.Tensor
         attention_weights: torch.Tensor
-        attention_output, attention_weights = get_masked_attention_output(
-            module=module,
-            queries=queries,
-            keys=keys,
-            values=values,
-            attention_mask=attention_mask,
-            sinks=s_aux,
-            scaling=scaling,
-            dropout=dropout,
-            sparse_attention_mask=sparse_attention_mask,
-            return_attention_weights=True,
-            **kwargs,
-        )
+        with stage("core/masked_attention_output"):
+            attention_output, attention_weights = get_masked_attention_output(
+                module=module,
+                queries=queries,
+                keys=keys,
+                values=values,
+                attention_mask=attention_mask,
+                sinks=s_aux,
+                scaling=scaling,
+                dropout=dropout,
+                sparse_attention_mask=sparse_attention_mask,
+                return_attention_weights=True,
+                **kwargs,
+            )
 
         if MicroMetricLogger().is_metric_enabled("research_attention_output_error"):
             true_attention_output, _ = get_true_attention_output(

@@ -193,6 +193,11 @@ class HashAttentionTopKMasker(TopKMasker):
             layer_idx,
             **kwargs,
         )
+        # Expose the approximate scores so downstream tail aggregation can bin the
+        # non-selected tokens by them at zero extra cost (they are already computed
+        # here for selection).  Overwritten every call, so nothing accumulates.
+        sparse_meta_data.setdefault("hat_scores", {})[layer_idx] = scores
+
         top_k_indices: torch.Tensor = self._get_topk_indices_from_inactive_positions(
             scores, previous_mask, heavy_size
         )
